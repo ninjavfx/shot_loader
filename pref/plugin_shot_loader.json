@@ -1,0 +1,17 @@
+{
+  "plugin": {
+    "shot_loader": {
+      "cdl_search_locations": {
+        "path": "/plugin/shot_loader/cdl_search_locations",
+        "default_value": ["same-directory", "parent-directory"],
+        "value": ["same-directory", "parent-directory"],
+        "datatype": "json",
+        "context": ["APPLICATION"],
+        "category": "Shot Loader",
+        "display_name": "CDL search locations",
+        "description": "Ordered locations to check for a per-shot .ccc file. Valid entries are same-directory and parent-directory.",
+        "options": "import xStudio 1.0; XsJsonPreference {}"
+      }
+    }
+  }
+}
