@@ -1,0 +1,4 @@
+__pycache__/
+*.py[cod]
+shot_loader.log
+xstudio.log
