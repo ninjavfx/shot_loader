@@ -53,6 +53,38 @@ class FileScanner:
             
         return f"{p:.2f} {size_name[i]}"
 
+    def _entry_kind(self, entry):
+        """Return ``(is_directory, is_file)`` for a directory entry.
+
+        Some SMB mounts expose server-side symlinks correctly through lstat(),
+        but DirEntry's cached type can report directory links as regular files.
+        Fall back to path-based stat calls for ambiguous/non-media entries.
+        """
+        try:
+            if entry.is_dir(follow_symlinks=True):
+                return True, False
+            if entry.is_file(follow_symlinks=True):
+                # SMB server-side directory links can be misreported as files.
+                # Recognized media extensions are overwhelmingly real files and
+                # retain the fast path; verify everything else by its path.
+                extension = os.path.splitext(entry.name)[1].lower()
+                if extension in self.extensions:
+                    return False, True
+                if os.path.isdir(entry.path):
+                    return True, False
+                return False, True
+        except OSError:
+            pass
+
+        try:
+            if os.path.isdir(entry.path):
+                return True, False
+            if os.path.isfile(entry.path):
+                return False, True
+        except OSError:
+            pass
+        return False, False
+
     def scan(self, start_path, callback=None):
         """
         Scans from start_path using BFS and weighted progress.
@@ -63,11 +95,14 @@ class FileScanner:
         from collections import deque
         from concurrent.futures import wait, FIRST_COMPLETED
 
-        # Queue of (path, weight, depth)
-        queue = deque([(start_path, 1.0, 0)])
+        # Queue of (path, weight, depth, real paths visited by this branch).
+        # Tracking ancestry per branch lets separate symlink aliases be scanned,
+        # while preventing a link back to a parent from recursing forever.
+        start_real_path = os.path.realpath(start_path)
+        queue = deque([(start_path, 1.0, 0, frozenset([start_real_path]))])
         
-        # Futures set
-        futures = set()
+        # Futures mapped to the resolved ancestry for their scan branch.
+        futures = {}
         
         # Results accumulator
         all_items = []
@@ -83,9 +118,15 @@ class FileScanner:
         # Helper to schedule
         def schedule_next():
             while queue and len(futures) < self.max_workers:
-                path, weight, depth = queue.popleft()
+                path, weight, depth, ancestors = queue.popleft()
                 # Submit task
-                futures.add(self.executor.submit(self._scan_and_process_worker, path, start_path, weight, depth))
+                future = self.executor.submit(
+                    self._scan_and_process_worker,
+                    path,
+                    start_path,
+                    weight,
+                    depth)
+                futures[future] = ancestors
 
         schedule_next()
         
@@ -94,7 +135,7 @@ class FileScanner:
             done, _ = wait(futures, timeout=0.05, return_when=FIRST_COMPLETED)
             
             for f in done:
-                futures.remove(f)
+                ancestors = futures.pop(f)
                 try:
                     subdirs, items, weight, depth, scanned_path = f.result()
                     
@@ -114,10 +155,23 @@ class FileScanner:
                     # Distribute weight or complete it
                     # print ("Scanned: {}, Depth: {}, Subdirs: {} = {}".format(scanned_path, depth, subdirs, self.max_depth))
                     if subdirs and depth < self.max_depth:
-                        if len(subdirs) > 0:
-                            child_weight = weight / len(subdirs)
-                            for d in subdirs:
-                                queue.append((d, child_weight, depth + 1))
+                        scannable_subdirs = []
+                        for directory in subdirs:
+                            real_directory = os.path.realpath(directory)
+                            if real_directory not in ancestors:
+                                scannable_subdirs.append((directory, real_directory))
+
+                        if scannable_subdirs:
+                            child_weight = weight / len(scannable_subdirs)
+                            for directory, real_directory in scannable_subdirs:
+                                queue.append((
+                                    directory,
+                                    child_weight,
+                                    depth + 1,
+                                    ancestors | frozenset([real_directory])))
+                        else:
+                            # Every child points back into this branch.
+                            total_progress += weight
                     else:
                         # Leaf node (in terms of dirs or recursion limit), this weight is done
                         total_progress += weight
@@ -166,8 +220,13 @@ class FileScanner:
                 for entry in entries:
                     if self.cancel_event.is_set():
                         break
-                    
-                    if entry.is_dir(follow_symlinks=False):
+
+                    is_directory, is_file = self._entry_kind(entry)
+
+                    # Follow directory symlinks so linked media trees behave
+                    # exactly like physical directories. scan() guards against
+                    # links that point back to an ancestor.
+                    if is_directory:
                         if entry.name not in self.ignore_dirs and not entry.name.startswith('.'):
                             subdirs.append(entry.path)
                             # Also add directory as an item
@@ -175,7 +234,7 @@ class FileScanner:
                                 raw_files.append((entry.path, entry.name, entry.stat(), True)) # True for is_dir
                             except OSError:
                                 pass
-                    elif entry.is_file():
+                    elif is_file:
                         ext = os.path.splitext(entry.name)[1].lower()
                         if ext in self.extensions:
                             try:

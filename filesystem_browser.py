@@ -56,6 +56,22 @@ def _dbg(*msg):
     except Exception:
         pass
 
+def _entry_is_directory(entry):
+    """Identify directories reliably, including SMB-hosted symlinks.
+
+    On some network shares DirEntry's cached type is unknown even though a
+    normal stat through the entry path resolves the symlink successfully.
+    """
+    try:
+        if entry.is_dir(follow_symlinks=True):
+            return True
+    except OSError:
+        pass
+    try:
+        return os.path.isdir(entry.path)
+    except OSError:
+        return False
+
 _cdl_log("shot_loader module loaded")
 
 # PySide6 dependency removed
@@ -1134,7 +1150,7 @@ class ShotLoaderPlugin(PluginBase):
                         if entry.name in self.ignore_dirs or entry.name.startswith('.'):
                             continue
 
-                        if entry.is_dir():
+                        if _entry_is_directory(entry):
                             # Filter by base case-insensitive
                             if entry.name.lower().startswith(base.lower()):
                                 candidates.append(entry.path + os.path.sep)
@@ -1210,7 +1226,7 @@ class ShotLoaderPlugin(PluginBase):
                         if entry.path in self.root_ignore_dirs:
                             continue
                             
-                        if entry.is_dir():
+                        if _entry_is_directory(entry):
                             dirs.append({
                                 "name": entry.name,
                                 "path": entry.path

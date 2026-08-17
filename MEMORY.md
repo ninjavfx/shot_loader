@@ -43,6 +43,13 @@ search_path: luts:${CDL_dir}:${CDL_dir}/..
   shader before the metadata is visible.
 - The QML preview timer suppresses the release event following a double-click,
   preventing a preview source from replacing the intentionally loaded source.
+- Directory symlinks are followed by both the browser tree and background
+  scanner. The scanner tracks resolved ancestors per traversal branch so a
+  symlink cycle cannot recurse indefinitely, while separate aliases remain
+  independently browsable.
+- Some SMB shares report server-side directory symlinks as regular files through
+  Python's cached `DirEntry` type methods. Directory discovery therefore falls
+  back to path-based `os.path.isdir()` checks for ambiguous/non-media entries.
 - **Shift+S** toggles Shot Loader's xStudio-managed pop-out window.
 
 ## Publishing notes

@@ -67,6 +67,38 @@ class TestFileScanner(unittest.TestCase):
         results = scanner.scan(self.test_dir)
         self.assertEqual(len(results), 0)
 
+    def test_follows_symlinked_media_directory(self):
+        external_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, external_dir)
+        frame_path = os.path.join(external_dir, "plate.1001.exr")
+        with open(frame_path, "w") as stream:
+            stream.write("frame")
+
+        linked_frames = os.path.join(self.test_dir, "frames")
+        os.symlink(external_dir, linked_frames)
+
+        scanner = FileScanner(config={"max_depth": 1})
+        results = scanner.scan(self.test_dir)
+
+        self.assertTrue(any(
+            item["path"] == linked_frames and item["is_folder"]
+            for item in results))
+        self.assertTrue(any(
+            item["path"].startswith(linked_frames + os.sep)
+            and "plate" in item["name"]
+            for item in results))
+
+    def test_symlink_cycle_is_not_recursed(self):
+        loop_path = os.path.join(self.test_dir, "loop")
+        os.symlink(self.test_dir, loop_path)
+
+        scanner = FileScanner(config={"max_depth": 20})
+        results = scanner.scan(self.test_dir)
+
+        self.assertEqual(
+            [item["path"] for item in results if item["is_folder"]],
+            [loop_path])
+
     def test_callback(self):
         self.create_file("test.mov")
         os.makedirs(os.path.join(self.test_dir, "subdir"))
