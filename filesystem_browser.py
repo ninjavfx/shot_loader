@@ -102,6 +102,24 @@ class XStudioHostInterface:
         self.plugin = plugin
         self.preview_playlist = None
 
+    def _start_play_on_load(self):
+        """Return xStudio's user preference, defaulting to its built-in ``True``.
+
+        ``playing`` is an imperative playhead command, so setting it unconditionally
+        bypasses the QML UI's ``Start playing on load`` preference. Loaders must
+        consult the global preference store themselves before issuing that command.
+        """
+        try:
+            value = self.connection.api.global_store.value(
+                "/ui/qml/start_play_on_load")
+            if hasattr(value, "dump"):
+                value = json.loads(value.dump())
+            return bool(value)
+        except Exception:
+            # Match xStudio's declared preference default if the store cannot yet
+            # be contacted (for example, during early plug-in startup).
+            return True
+
     def _resolve_active_playlist(self):
         """
         Attempts to find an active (on-screen or selected) playlist that isn't the Preview playlist.
@@ -314,7 +332,8 @@ class XStudioHostInterface:
         self._apply_cdl_context(media, path)
         self.connection.api.session.viewed_container = target_playlist
         target_playlist.playhead_selection.set_selection([media.uuid])
-        target_playlist.playhead.playing = True
+        if self._start_play_on_load():
+            target_playlist.playhead.playing = True
 
     def replace_current_media(self, path):
         """
@@ -406,7 +425,8 @@ class XStudioHostInterface:
 
         self.connection.api.session.viewed_container = self.preview_playlist
         self.preview_playlist.playhead_selection.set_selection([media.uuid])
-        self.preview_playlist.playhead.playing = True
+        if self._start_play_on_load():
+            self.preview_playlist.playhead.playing = True
 
 
 class ShotLoaderPlugin(PluginBase):
