@@ -50,6 +50,10 @@ search_path: luts:${CDL_dir}:${CDL_dir}/..
 - Some SMB shares report server-side directory symlinks as regular files through
   Python's cached `DirEntry` type methods. Directory discovery therefore falls
   back to path-based `os.path.isdir()` checks for ambiguous/non-media entries.
+- Standard Load and Preview actions honour xStudio's global **Start playing on
+  load** preference (`/ui/qml/start_play_on_load`). They still select and show
+  the media when it is disabled; Replace and Compare intentionally start
+  playback as explicit playback actions.
 - **Shift+S** toggles Shot Loader's xStudio-managed pop-out window.
 
 ## Publishing notes
